@@ -190,18 +190,13 @@ with st.sidebar:
     st.caption("需啟用 Routes API 與計費。金鑰僅保留在本次工作階段。")
 
 
-
-# 🌟 禁止瀏覽器自動翻譯日曆元件（防止「蘇莫圖我們釷法蘭西斯罐」發生）
 st.markdown("""
-    <style>
-        /* 鎖定 Streamlit 日曆與下拉選單區塊，禁止自動翻譯 */
-        div[data-baseweb="calendar"], 
-        div[data-baseweb="popover"],
-        div[data-baseweb="select"] {
-            translate: no !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
+```mermaid
+flowchart LR
+    A[🧠 風險預警] --> B[🎯 智慧媒合]
+    B --> C[🩺 健康救火]
+    C --> D[🗺️ 供需預測]
+    D --> E[📈 營運 KPI]
 
 st.title("CareMatch AI 居家照護排班")
 
