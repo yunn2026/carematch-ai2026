@@ -190,13 +190,6 @@ with st.sidebar:
     st.caption("需啟用 Routes API 與計費。金鑰僅保留在本次工作階段。")
 
 
-st.markdown("""
-```mermaid
-flowchart LR
-    A[🧠 風險預警] --> B[🎯 智慧媒合]
-    B --> C[🩺 健康救火]
-    C --> D[🗺️ 供需預測]
-    D --> E[📈 營運 KPI]
 
 st.title("CareMatch AI 居家照護排班")
 
