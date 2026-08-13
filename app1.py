@@ -60,7 +60,13 @@ def init() -> None:
     st.session_state.setdefault("protected", set())
     st.session_state.setdefault("assignments", [])
     st.session_state.setdefault("route_cache", {})
-    st.session_state.setdefault("map_key", os.getenv("GOOGLE_MAPS_API_KEY", ""))
+    try:
+        secret_map_key = st.secrets.get("GOOGLE_MAPS_API_KEY", "")
+    except Exception:
+        secret_map_key = ""
+    st.session_state.setdefault(
+        "map_key", secret_map_key or os.getenv("GOOGLE_MAPS_API_KEY", "")
+    )
 
 
 def route(origin: str, destination: str) -> tuple[float, float, str, str]:
@@ -194,12 +200,7 @@ with st.sidebar:
     if st.button("重新產生隨機資料", use_container_width=True):
         reset_data()
         st.rerun()
-    st.session_state.map_key = st.text_input(
-    "Google Maps API 金鑰",
-    st.session_state.map_key,
-    type="password").strip()
-    
-    st.caption("需啟用 Routes API 與計費。金鑰僅保留在本次工作階段。")
+    st.caption("路線資料由系統安全設定提供；若暫時無法連線，將使用預估路程備援。")
 
 # 🌟 禁止瀏覽器自動翻譯日曆與選單元件
 st.markdown("""
