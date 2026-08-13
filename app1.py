@@ -336,6 +336,11 @@ with tabs[2]:
     col_case, col_date = st.columns([2, 1])
     
     with col_case:
+        # 派案成功後，下一次重新整理前先套用要切換的個案，避免在同一輪修改既有元件狀態。
+        if "next_case_picker_index" in st.session_state:
+            st.session_state.case_picker_index = st.session_state.pop(
+                "next_case_picker_index"
+            )
         selected_index = st.selectbox(
             "選擇匹配／派單個案：", 
             options=cases.index, 
@@ -458,7 +463,35 @@ with tabs[2]:
                         ok, message = commit(case, pick, selected_date)
                         if ok:
                             st.success(message)
-                            st.session_state.notification_toast = "派案已確認，通知已產生。"
+                            all_case_indices = list(cases.index)
+                            assigned_ids_today = {
+                                item["個案ID"]
+                                for item in st.session_state.assignments
+                                if item["服務日"] == selected_date
+                            }
+                            pending_indices = [
+                                idx
+                                for idx in all_case_indices
+                                if cases.loc[idx, "id"] not in assigned_ids_today
+                            ]
+                            current_position = all_case_indices.index(selected_index)
+                            next_order = (
+                                all_case_indices[current_position + 1:]
+                                + all_case_indices[:current_position]
+                            )
+                            next_index = next(
+                                (idx for idx in next_order if idx in pending_indices),
+                                None,
+                            )
+                            if next_index is not None:
+                                st.session_state.next_case_picker_index = next_index
+                                st.session_state.notification_toast = (
+                                    "派案已確認，通知已產生；已切換至下一位待排個案。"
+                                )
+                            else:
+                                st.session_state.notification_toast = (
+                                    "派案已確認，通知已產生；這個日期的個案都已完成派遣。"
+                                )
                             st.rerun()
                         else:
                             st.error(message)
