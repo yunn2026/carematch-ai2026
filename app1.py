@@ -68,7 +68,12 @@ def reset_data() -> None:
 
 
 def init() -> None:
-    if "caregivers" not in st.session_state:
+    # 舊工作階段的模擬資料沒有「路線位置」欄位；自動重建一次即可相容新版路線計算。
+    if (
+        "caregivers" not in st.session_state
+        or "路線位置" not in st.session_state.caregivers.columns
+        or "路線位置" not in st.session_state.cases.columns
+    ):
         reset_data()
     st.session_state.setdefault("protected", set())
     st.session_state.setdefault("assignments", [])
