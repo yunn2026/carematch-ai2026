@@ -18,6 +18,15 @@ ADDRESSES = {
     "松山區": "台北市松山區八德路四段",
     "內湖區": "台北市內湖區內湖路一段"
 }
+# 比賽展示用的公開道路位置：不使用任何真實個案或居服員住址。
+# 每一筆模擬資料都有不同起訖點，才能讓同區服務也使用 Google Routes API 計算。
+DEMO_ROUTE_POINTS = {
+    "中正區": ["台北市中正區忠孝西路一段50號", "台北市中正區杭州南路一段15號", "台北市中正區南昌路一段7號"],
+    "大安區": ["台北市大安區新生南路二段1號", "台北市大安區和平東路二段134號", "台北市大安區復興南路二段237號"],
+    "信義區": ["台北市信義區市府路1號", "台北市信義區松高路11號", "台北市信義區信義路五段7號"],
+    "松山區": ["台北市松山區八德路四段138號", "台北市松山區南京東路四段2號", "台北市松山區敦化北路199巷"],
+    "內湖區": ["台北市內湖區內湖路一段91巷", "台北市內湖區成功路四段30巷", "台北市內湖區洲子街12號"],
+}
 LANGUAGES = ["國語", "台語", "客語", "英語"]
 SKILLS = ["生活照顧", "移位與搬運", "失智症照護", "傷口照護", "陪同就醫", "沐浴協助"]
 
@@ -28,8 +37,10 @@ def make_data(seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     for i in range(1, 25):
         stress, overtime, commute = rng.randint(1, 9), rng.randint(0, 5), rng.randint(15, 55)
         risk = min(100, round(stress * 6.5 + overtime * 7 + max(commute - 30, 0) * 1.1 + rng.uniform(-7, 7), 1))
+        district = rng.choice(DISTRICTS)
         people.append({
-            "id": f"CG{i:03d}", "姓名": f"居服員_{i}", "區域": rng.choice(DISTRICTS),
+            "id": f"CG{i:03d}", "姓名": f"居服員_{i}", "區域": district,
+            "路線位置": rng.choice(DEMO_ROUTE_POINTS[district]),
             "語言": rng.choice(LANGUAGES), "技能": rng.sample(SKILLS, rng.randint(3, 5)),
             "疲勞風險": risk, "壓力": stress, "近月加班": overtime
         })
@@ -37,8 +48,10 @@ def make_data(seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     for i in range(1, 51):
         bp, activity = rng.randint(0, 5), rng.randint(0, 50)
         risk = "高" if bp >= 3 or activity >= 35 else "中" if bp >= 1 or activity >= 15 else "低"
+        district = rng.choice(DISTRICTS)
         cases.append({
-            "id": f"CASE{i:03d}", "姓名": f"長輩_{i}", "區域": rng.choice(DISTRICTS),
+            "id": f"CASE{i:03d}", "姓名": f"長輩_{i}", "區域": district,
+            "路線位置": rng.choice(DEMO_ROUTE_POINTS[district]),
             "語言": rng.choice(LANGUAGES), "需求技能": rng.sample(SKILLS, rng.randint(1, 2)),
             "熟悉居服員": rng.sample([p["id"] for p in people], 2), "血壓異常天數": bp,
             "活動下降": activity, "風險": risk, "服務日": rng.randrange(7)
@@ -75,9 +88,7 @@ def route(origin: str, destination: str) -> tuple[float, float, str, str]:
     if key in st.session_state.route_cache:
         return st.session_state.route_cache[key]
     
-    if origin == destination:
-        result = (4.0, 1.2, "同區估算", "同一行政區")
-    elif not st.session_state.map_key:
+    if not st.session_state.map_key:
         result = (18.0, 5.0, "估算", "未設定 Google Maps API 金鑰")
     else:
         url = "https://routes.googleapis.com/directions/v2:computeRoutes"
@@ -136,7 +147,7 @@ def candidates(case: pd.Series, target_date: date, use_maps: bool = True) -> lis
         if cg["語言"] not in ("國語", case["語言"]):
             continue
         if use_maps:
-            minutes, km, source, detail = route(cg["區域"], case["區域"])
+            minutes, km, source, detail = route(cg["路線位置"], case["路線位置"])
         else:
             minutes = 4.0 if cg["區域"] == case["區域"] else 18.0
             km, source, detail = (1.2 if cg["區域"] == case["區域"] else 5.0), "模型估算", "週期模擬"
