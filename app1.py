@@ -317,7 +317,7 @@ def three_options(pool: list[dict]) -> list[tuple[str, dict]]:
 
 def commit(case: pd.Series, choice: dict, target_date: date) -> tuple[bool, str]:
     if choice["居服員ID"] in st.session_state.protected:
-        return False, "此居服員已被強制休息，系統拒絕排班。"
+        return False, "此居服員目前處於排班保護狀態，系統拒絕派案。"
     if load_for(choice["居服員ID"], target_date) >= 3:
         return False, "此居服員當日已達 3 件服務上限。"
     if any(x["個案ID"] == case.id and x["服務日"] == target_date for x in st.session_state.assignments):
@@ -453,7 +453,7 @@ with tabs[1]:
     if protected_cg.empty:
         st.info("目前無任何居服員處於排班保護狀態。所有媒合與儲存排班皆正常運算。")
     else:
-        st.caption("以下居服員目前受到系統保護，智慧媒合與緊急救火皆會自動過濾排除。需確認恢復可服務狀態後，方可解除保護：")
+        st.caption("以下居服員目前受到系統保護，智慧媒合與緊急派案皆會自動過濾排除。需確認恢復可服務狀態後，方可解除保護：")
         for _, cg in protected_cg.iterrows():
             with st.container(border=True):
                 col_a, col_b = st.columns([5, 1])
@@ -467,7 +467,7 @@ with tabs[1]:
 
 with tabs[2]:
     st.header("🎯 三大 AI 調度方案與決策分析")
-    st.caption("結合多目標優化演算法與可解釋 AI，清晰呈現各推薦人選的適配優勢與風險提醒。")
+    st.caption("依技能、可服務時段、路程與預估疲勞，呈現可供督導比較的派案建議與風險提醒。")
     
     col_case, col_date = st.columns([2, 1])
     
@@ -510,7 +510,7 @@ with tabs[2]:
     )
     
     if not choices:
-        st.warning(f"在 {selected_date} 沒有符合技能、語言、強制休息或當日額滿的可用居服員。")
+        st.warning(f"在 {selected_date} 沒有符合技能、語言、排班保護或當日額滿條件的可用居服員。")
     else:
         st.subheader(f"派案建議（{selected_date}）")
         st.caption("系統已排除保護中、時段衝突與當日服務量達上限的人員；由督導做最終派案判斷。")
@@ -773,7 +773,7 @@ with tabs[3]:
                     st.write(f"🏷️ **需求技能：** {', '.join(row['需求技能'])}")
 
                 with c3:
-                    with st.popover("🚨 一鍵指派緊急巡視", use_container_width=True):
+                    with st.popover("緊急巡視派案", use_container_width=True):
                         st.write(f"**為 {row['姓名']} 安排緊急巡視**（日期：{target_date}）")
                         pool = candidates(row, target_date)
 
@@ -785,7 +785,7 @@ with tabs[3]:
                                 for p in pool
                             }
                             selected_cg_label = st.selectbox(
-                                "AI 推薦居服員",
+                                "建議派案居服員",
                                 list(cg_options.keys()),
                                 key=f"triage_select_{row['id']}"
                             )
@@ -801,7 +801,7 @@ with tabs[3]:
                                 reasons.append("🚗 跨區支援，請留意交通時間")
                             if selected_pick["預估疲勞"] < 60:
                                 reasons.append("🧠 預估疲勞在可接受範圍")
-                            st.caption("💡 **AI 推薦理由：** " + "｜".join(reasons))
+                            st.caption("**媒合依據：** " + "｜".join(reasons))
                             st.divider()
                             st.markdown("#### 📱 通知預覽與服務注意事項")
                             cg_memo = st.text_area("傳給居服員的指派訊息（可自行調整）：",
@@ -942,7 +942,7 @@ with tabs[0]:
 with tabs[4]:
     st.header("AI 導入營運關鍵指標 KPI（依實際排班計算）")
     st.caption("成效比較將聚焦四項指標：交通移動、居服員負荷、服務連續性與督導調度時間。")
-    st.write("依本輪隨機資料進行一週每日排班模擬；不是固定預設值。重新產生資料或強制休息名單變動後，結果都會改變。")
+    st.write("依本輪隨機資料進行一週每日排班模擬；不是固定預設值。重新產生資料或排班保護名單變動後，結果都會改變。")
     frame = efficiency_frame()
     if frame.empty:
         st.info("尚無排班紀錄。完成排班後，這裡才會產生每日與每週的真實效率指標。")
