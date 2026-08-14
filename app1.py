@@ -521,7 +521,27 @@ with tabs[2]:
     )
     
     if not choices:
-        st.warning(f"在 {selected_date} 沒有符合技能、語言、排班保護或當日額滿條件的可用居服員。")
+        st.error("無安全可派人選：系統不會為了完成派案而忽略技能、時段或過勞風險。")
+        st.write("請由督導啟動緊急調度：優先聯絡備勤／機動人力，其次擴大跨區支援；固定時段案件須維持服務並同步通知家屬。")
+        escalation_key = f"{selected_date}_{selected_id}"
+        existing_escalations = st.session_state.setdefault("escalations", [])
+        already_escalated = any(item["key"] == escalation_key for item in existing_escalations)
+        if st.button(
+            "建立督導緊急調度任務" if not already_escalated else "已建立督導緊急調度任務",
+            key=f"escalate_{escalation_key}",
+            disabled=already_escalated,
+            use_container_width=True,
+        ):
+            existing_escalations.append({
+                "key": escalation_key,
+                "服務日": selected_date,
+                "個案ID": selected_id,
+                "個案": case["姓名"],
+                "原因": "無安全可派人選",
+                "處置": "聯絡備勤／機動人力、擴大跨區支援並通知家屬",
+            })
+            st.toast("已建立督導緊急調度任務，請優先聯絡備勤或合作人力。", icon="⚠️")
+            st.rerun()
     else:
         st.subheader(f"派案建議（{selected_date}）")
         st.caption("系統已排除保護中、時段衝突與當日服務量達上限的人員；由督導做最終派案判斷。")
