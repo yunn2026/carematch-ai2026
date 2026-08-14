@@ -18,8 +18,6 @@ ADDRESSES = {
     "松山區": "台北市松山區八德路四段",
     "內湖區": "台北市內湖區內湖路一段"
 }
-# 比賽展示用的公開道路位置：不使用任何真實個案或居服員住址。
-# 每一筆模擬資料都有不同起訖點，才能讓同區服務也使用 Google Routes API 計算。
 DEMO_ROUTE_POINTS = {
     "中正區": ["台北市中正區忠孝西路一段50號", "台北市中正區杭州南路一段15號", "台北市中正區南昌路一段7號"],
     "大安區": ["台北市大安區新生南路二段1號", "台北市大安區和平東路二段134號", "台北市大安區復興南路二段237號"],
@@ -33,29 +31,96 @@ SKILLS = ["生活照顧", "移位與搬運", "失智症照護", "傷口照護", 
 
 def make_data(seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     rng = random.Random(seed)
+
+    shift_templates = [
+        ("早班", 7 * 60, 13 * 60),
+        ("日班", 8 * 60, 17 * 60),
+        ("中班", 10 * 60, 18 * 60),
+        ("晚班", 12 * 60, 20 * 60),
+        ("上午短班", 7 * 60, 11 * 60),
+        ("下午短班", 13 * 60, 17 * 60),
+    ]
+
     people = []
     for i in range(1, 25):
-        stress, overtime, commute = rng.randint(1, 9), rng.randint(0, 5), rng.randint(15, 55)
-        risk = min(100, round(stress * 6.5 + overtime * 7 + max(commute - 30, 0) * 1.1 + rng.uniform(-7, 7), 1))
+        stress = rng.randint(1, 9)
+        overtime = rng.randint(0, 5)
+        commute = rng.randint(15, 55)
+        risk = min(
+            100,
+            round(
+                stress * 6.5
+                + overtime * 7
+                + max(commute - 30, 0) * 1.1
+                + rng.uniform(-7, 7),
+                1
+            )
+        )
+
+        shift_name, available_start, available_end = rng.choice(shift_templates)
+
         district = rng.choice(DISTRICTS)
         people.append({
-            "id": f"CG{i:03d}", "姓名": f"居服員_{i}", "區域": district,
+            "id": f"CG{i:03d}",
+            "姓名": f"居服員_{i}",
+            "區域": district,
             "路線位置": rng.choice(DEMO_ROUTE_POINTS[district]),
-            "語言": rng.choice(LANGUAGES), "技能": rng.sample(SKILLS, rng.randint(3, 5)),
-            "疲勞風險": risk, "壓力": stress, "近月加班": overtime
+            "語言": rng.choice(LANGUAGES),
+            "技能": rng.sample(SKILLS, rng.randint(3, 5)),
+            "疲勞風險": risk,
+            "壓力": stress,
+            "近月加班": overtime,
+            "班別": shift_name,
+            "可服務開始": available_start,
+            "可服務結束": available_end,
         })
+
     cases = []
+    physical_needs = {"移位與搬運", "傷口照護", "沐浴協助"}
+
     for i in range(1, 51):
-        bp, activity = rng.randint(0, 5), rng.randint(0, 50)
-        risk = "高" if bp >= 3 or activity >= 35 else "中" if bp >= 1 or activity >= 15 else "低"
+        bp = rng.randint(0, 5)
+        activity = rng.randint(0, 50)
+        risk = (
+            "高" if bp >= 3 or activity >= 35
+            else "中" if bp >= 1 or activity >= 15
+            else "低"
+        )
+
+        needs = rng.sample(SKILLS, rng.randint(1, 2))
+
+        if risk == "高" or (len(needs) == 2 and set(needs) & physical_needs):
+            duration = rng.choice([120, 150, 180])
+        elif set(needs) & physical_needs:
+            duration = rng.choice([60, 75, 90])
+        else:
+            duration = rng.choice([30, 45, 60])
+
+        is_fixed = "陪同就醫" in needs or rng.random() < 0.35
+        fixed_start = (
+            rng.randrange(7 * 60 + 30, 20 * 60 - duration + 1, 30)
+            if is_fixed
+            else None
+        )
+
         district = rng.choice(DISTRICTS)
         cases.append({
-            "id": f"CASE{i:03d}", "姓名": f"長輩_{i}", "區域": district,
+            "id": f"CASE{i:03d}",
+            "姓名": f"長輩_{i}",
+            "區域": district,
             "路線位置": rng.choice(DEMO_ROUTE_POINTS[district]),
-            "語言": rng.choice(LANGUAGES), "需求技能": rng.sample(SKILLS, rng.randint(1, 2)),
-            "熟悉居服員": rng.sample([p["id"] for p in people], 2), "血壓異常天數": bp,
-            "活動下降": activity, "風險": risk, "服務日": rng.randrange(7)
+            "語言": rng.choice(LANGUAGES),
+            "需求技能": needs,
+            "熟悉居服員": rng.sample([p["id"] for p in people], 2),
+            "血壓異常天數": bp,
+            "活動下降": activity,
+            "風險": risk,
+            "服務日": rng.randrange(7),
+            "服務分鐘": duration,
+            "時段類型": "固定時段" if is_fixed else "可彈性調整",
+            "固定開始分鐘": fixed_start,
         })
+
     return pd.DataFrame(people), pd.DataFrame(cases)
 
 
@@ -68,9 +133,10 @@ def reset_data() -> None:
 
 
 def init() -> None:
-    # 舊工作階段的模擬資料沒有「路線位置」欄位；自動重建一次即可相容新版路線計算。
     if (
         "caregivers" not in st.session_state
+        or "可服務開始" not in st.session_state.caregivers.columns
+        or "服務分鐘" not in st.session_state.cases.columns
         or "路線位置" not in st.session_state.caregivers.columns
         or "路線位置" not in st.session_state.cases.columns
     ):
@@ -78,13 +144,16 @@ def init() -> None:
     st.session_state.setdefault("protected", set())
     st.session_state.setdefault("assignments", [])
     st.session_state.setdefault("route_cache", {})
-    try:
-        secret_map_key = st.secrets.get("GOOGLE_MAPS_API_KEY", "")
-    except Exception:
-        secret_map_key = ""
-    st.session_state.setdefault(
-        "map_key", secret_map_key or os.getenv("GOOGLE_MAPS_API_KEY", "")
-    )
+    # 金鑰只從 Streamlit Secrets／環境變數讀取，不在網頁上顯示或輸入。
+    if "map_key" not in st.session_state:
+        try:
+            map_key = st.secrets.get("GOOGLE_MAPS_API_KEY", "")
+        except Exception:
+            # 本機尚未建立 secrets.toml 時，仍可正常啟動。
+            map_key = ""
+        st.session_state.map_key = str(
+            map_key or os.getenv("GOOGLE_MAPS_API_KEY", "")
+        ).strip()
 
 
 def route(origin: str, destination: str) -> tuple[float, float, str, str]:
@@ -93,7 +162,9 @@ def route(origin: str, destination: str) -> tuple[float, float, str, str]:
     if key in st.session_state.route_cache:
         return st.session_state.route_cache[key]
     
-    if not st.session_state.map_key:
+    if origin == destination:
+        result = (4.0, 1.2, "同區估算", "同一行政區")
+    elif not st.session_state.map_key:
         result = (18.0, 5.0, "估算", "未設定 Google Maps API 金鑰")
     else:
         url = "https://routes.googleapis.com/directions/v2:computeRoutes"
@@ -142,6 +213,58 @@ def load_for(cg_id: str, target_date: date) -> int:
     return sum(x["居服員ID"] == cg_id and x["服務日"] == target_date for x in st.session_state.assignments)
 
 
+def format_clock(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def caregiver_day_assignments(cg_id: str, target_date: date) -> list[dict]:
+    return sorted(
+        [item for item in st.session_state.assignments if item["居服員ID"] == cg_id and item["服務日"] == target_date and "服務開始分鐘" in item],
+        key=lambda item: item["服務開始分鐘"],
+    )
+
+
+def feasible_service_window(cg: pd.Series, case: pd.Series, target_date: date) -> tuple[int, int, float] | None:
+    duration = int(case["服務分鐘"])
+    assigned = caregiver_day_assignments(cg.id, target_date)
+
+    def fits(start: int) -> tuple[bool, float]:
+        end = start + duration
+        if start < int(cg["可服務開始"]) or end > int(cg["可服務結束"]):
+            return False, 0.0
+        previous = next((item for item in reversed(assigned) if item["服務開始分鐘"] <= start), None)
+        following = next((item for item in assigned if item["服務開始分鐘"] >= end), None)
+        if previous:
+            before, _, _, _ = route(previous["個案區域"], case["區域"])
+            ready_at = previous["服務結束分鐘"] + before + 10
+        else:
+            before, _, _, _ = route(cg["區域"], case["區域"])
+            ready_at = int(cg["可服務開始"]) + before + 10
+        if ready_at > start:
+            return False, 0.0
+        idle = start - ready_at
+        if following:
+            after, _, _, _ = route(case["區域"], following["個案區域"])
+            if end + after + 10 > following["服務開始分鐘"]:
+                return False, 0.0
+            idle += following["服務開始分鐘"] - (end + after + 10)
+        return True, idle
+
+    if case["時段類型"] == "固定時段":
+        start = int(case["固定開始分鐘"])
+        ok, idle = fits(start)
+        return (start, start + duration, idle) if ok else None
+    slots = []
+    for start in range(int(cg["可服務開始"]), int(cg["可服務結束"]) - duration + 1, 30):
+        ok, idle = fits(start)
+        if ok:
+            slots.append((idle, start))
+    if not slots:
+        return None
+    idle, start = min(slots, key=lambda item: (item[0], item[1]))
+    return start, start + duration, idle
+
+
 def candidates(case: pd.Series, target_date: date, use_maps: bool = True) -> list[dict]:
     rows = []
     for _, cg in st.session_state.caregivers.iterrows():
@@ -151,6 +274,10 @@ def candidates(case: pd.Series, target_date: date, use_maps: bool = True) -> lis
             continue
         if cg["語言"] not in ("國語", case["語言"]):
             continue
+        window = feasible_service_window(cg, case, target_date)
+        if window is None:
+            continue
+        service_start, service_end, idle_minutes = window
         if use_maps:
             minutes, km, source, detail = route(cg["路線位置"], case["路線位置"])
         else:
@@ -158,14 +285,16 @@ def candidates(case: pd.Series, target_date: date, use_maps: bool = True) -> lis
             km, source, detail = (1.2 if cg["區域"] == case["區域"] else 5.0), "模型估算", "週期模擬"
             
         familiar, same_area = cg.id in case["熟悉居服員"], cg["區域"] == case["區域"]
-        projected = min(100, cg["疲勞風險"] + 6 + minutes / 12 + load_for(cg.id, target_date) * 9)
-        score = 100 + (13 if familiar else 0) + (7 if same_area else 0) - minutes * 1.25 - projected * .32
+        projected = min(100, cg["疲勞風險"] + 4 + case["服務分鐘"] / 14 + minutes / 12 + load_for(cg.id, target_date) * 9)
+        score = 100 + (13 if familiar else 0) + (7 if same_area else 0) - minutes * 1.25 - projected * .32 - min(idle_minutes, 120) * .08
         
         rows.append({
             "居服員ID": cg.id, "姓名": cg["姓名"], "居服員區域": cg["區域"], "技能": cg["技能"], 
             "路程分鐘": minutes, "公里": km, "路線來源": source, "路線說明": detail, 
             "原疲勞": cg["疲勞風險"], "預估疲勞": round(projected, 1),
-            "綜合分數": round(score, 1), "熟悉個案": familiar
+            "綜合分數": round(score, 1), "熟悉個案": familiar,
+            "班別": cg["班別"], "可服務開始": int(cg["可服務開始"]), "可服務結束": int(cg["可服務結束"]),
+            "服務開始分鐘": service_start, "服務結束分鐘": service_end, "日內空等分鐘": round(idle_minutes, 1),
         })
     return sorted(rows, key=lambda r: r["綜合分數"], reverse=True)
 
@@ -180,8 +309,8 @@ def three_options(pool: list[dict]) -> list[tuple[str, dict]]:
         ("方案 C｜負荷最低", lambda r: (r["預估疲勞"], r["路程分鐘"]))
     ]
     for label, key in rules:
-        available = [r for r in pool if r["居服員ID"] not in {x[1]["居服員ID"] for x in picked}]
-        choice = min(available or pool, key=key)
+        # 三張卡是三種決策目標，可合理地指向同一位最合適的人員。
+        choice = min(pool, key=key)
         picked.append((label, choice))
     return picked
 
@@ -193,12 +322,20 @@ def commit(case: pd.Series, choice: dict, target_date: date) -> tuple[bool, str]
         return False, "此居服員當日已達 3 件服務上限。"
     if any(x["個案ID"] == case.id and x["服務日"] == target_date for x in st.session_state.assignments):
         return False, f"此長輩在 {target_date} 當日已完成排班，不可重複排班。"
-        
+    cg = st.session_state.caregivers.loc[st.session_state.caregivers["id"] == choice["居服員ID"]].iloc[0]
+    window = feasible_service_window(cg, case, target_date)
+    if window is None:
+        return False, "此居服員的班別、交通緩衝或既有服務時間已無法容納本案，請重新媒合。"
+    service_start, service_end, _ = window
+
     peers = candidates(case, target_date)
     st.session_state.assignments.append({
         "服務日": target_date, "通知狀態": "通知已產生", "個案ID": case.id, "個案": case["姓名"], 
         "居服員ID": choice["居服員ID"], "居服員": choice["姓名"], 
         "分鐘": choice["路程分鐘"], "公里": choice["公里"], "疲勞": choice["預估疲勞"],
+        "服務開始分鐘": service_start, "服務結束分鐘": service_end,
+        "服務時段": f"{format_clock(service_start)}–{format_clock(service_end)}",
+        "服務分鐘": int(case["服務分鐘"]), "時段類型": case["時段類型"], "個案區域": case["區域"],
         "基準分鐘": sum(p["路程分鐘"] for p in peers) / len(peers), 
         "基準疲勞": sum(p["預估疲勞"] for p in peers) / len(peers)
     })
@@ -216,7 +353,6 @@ with st.sidebar:
     if st.button("重新產生隨機資料", use_container_width=True):
         reset_data()
         st.rerun()
-    st.caption("路線資料由系統安全設定提供；若暫時無法連線，將使用預估路程備援。")
 
 # 🌟 禁止瀏覽器自動翻譯日曆與選單元件
 st.markdown("""
@@ -296,7 +432,7 @@ with tabs[1]:
     pending_risk_cg = high_risk_cg[~high_risk_cg["id"].isin(st.session_state.protected)]
     protected_cg = caregivers[caregivers["id"].isin(st.session_state.protected)]
     
-    st.subheader("⚠️ 高疲勞預警名單（需督導評估是否強制休息（停止本日派案））")
+    st.subheader("⚠️ 高疲勞預警名單（需督導評估是否啟動保護排班）")
     if pending_risk_cg.empty:
         st.success("✅ 目前無未處置的高過勞風險居服員。")
     else:
@@ -306,27 +442,27 @@ with tabs[1]:
                 with col_a:
                     st.write(f"**{cg['姓名']}（{cg.id}）**｜疲勞風險 **{cg['疲勞風險']}** 分｜近月加班 {cg['近月加班']} 次｜主責區域：{cg['區域']}")
                 with col_b:
-                    if st.button("強制休息", key=f"rest_{cg.id}", use_container_width=True):
+                    if st.button("啟動保護排班", key=f"rest_{cg.id}", use_container_width=True):
                         st.session_state.protected.add(cg.id)
-                        st.toast(f"🛡️ 已將 {cg['姓名']} 納入強制休息保護！", icon="🛑")
+                        st.toast(f"🛡️ 已啟動 {cg['姓名']} 的排班保護，暫停本日派案。", icon="🛑")
                         st.rerun()
 
     st.divider()
 
-    st.subheader("🛡️ 保護中的居服員已自動排除於 AI 智慧媒合與緊急個案派案名單")
+    st.subheader("🛡️ 保護排班中的居服員已自動排除於 AI 智慧媒合與緊急個案派案名單")
     if protected_cg.empty:
-        st.info("目前無任何居服員處於強制休息狀態。所有媒合與儲存排班皆正常運算。")
+        st.info("目前無任何居服員處於排班保護狀態。所有媒合與儲存排班皆正常運算。")
     else:
-        st.caption("以下居服員目前受到系統強制保護，智慧媒合與緊急救火皆會自動過濾排除：")
+        st.caption("以下居服員目前受到系統保護，智慧媒合與緊急救火皆會自動過濾排除。需確認恢復可服務狀態後，方可解除保護：")
         for _, cg in protected_cg.iterrows():
             with st.container(border=True):
                 col_a, col_b = st.columns([5, 1])
                 with col_a:
-                    st.write(f"🛑 **{cg['姓名']}（{cg.id}）**｜疲勞風險 {cg['疲勞風險']} 分｜保護狀態：**排班鎖定中**")
+                    st.write(f"🛑 **{cg['姓名']}（{cg.id}）**｜疲勞風險 {cg['疲勞風險']} 分｜保護狀態：**排班保護中**")
                 with col_b:
-                    if st.button("解除休息", key=f"unrest_{cg.id}", use_container_width=True):
+                    if st.button("覆核後解除保護", key=f"unrest_{cg.id}", use_container_width=True):
                         st.session_state.protected.remove(cg.id)
-                        st.toast(f"✅ 已解除 {cg['姓名']} 的休息狀態，恢復正常排班。", icon="🔓")
+                        st.toast(f"✅ 已完成 {cg['姓名']} 的覆核，恢復正常排班。", icon="🔓")
                         st.rerun()
 
 with tabs[2]:
@@ -336,15 +472,18 @@ with tabs[2]:
     col_case, col_date = st.columns([2, 1])
     
     with col_case:
-        # 派案成功後，下一次重新整理前先套用要切換的個案，避免在同一輪修改既有元件狀態。
         if "next_case_picker_index" in st.session_state:
             st.session_state.case_picker_index = st.session_state.pop(
                 "next_case_picker_index"
             )
+
         selected_index = st.selectbox(
-            "選擇匹配／派單個案：", 
-            options=cases.index, 
-            format_func=lambda idx: f"{cases.loc[idx, 'id']} - {cases.loc[idx, '姓名']}（{cases.loc[idx, '區域']}）",
+            "選擇匹配／派單個案：",
+            options=cases.index,
+            format_func=lambda idx: (
+                f"{cases.loc[idx, 'id']} - "
+                f"{cases.loc[idx, '姓名']}（{cases.loc[idx, '區域']}）"
+            ),
             key="case_picker_index"
         )
         
@@ -352,10 +491,11 @@ with tabs[2]:
         selected_date = st.date_input("選擇排班日期", value=date.today(), key="service_date")
         
     case = cases.iloc[selected_index]
-    st.caption(f"目前排班日期：{selected_date}｜同一位居服員每日最多安排 3 案。")
+    st.caption(f"目前排班日期：{selected_date}｜系統會檢查班別、服務時間、交通緩衝與每日最多 3 案。")
     selected_id = case["id"]
     
-    st.info(f"**選定長輩資訊：{case['姓名']}（{case['id']}）**｜區域：{case['區域']}｜需求標籤：{', '.join(case['需求技能'])}｜語言：{case['語言']}")
+    time_requirement = f"固定於 {format_clock(int(case['固定開始分鐘']))} 開始" if case["時段類型"] == "固定時段" else "可由 AI 依居服員空檔安排"
+    st.info(f"**選定長輩資訊：{case['姓名']}（{case['id']}）**｜區域：{case['區域']}｜需求標籤：{', '.join(case['需求技能'])}｜語言：{case['語言']}\n\n🕒 **{case['時段類型']}**｜服務約 **{case['服務分鐘']} 分鐘**｜{time_requirement}")
     
     pool = candidates(case, selected_date)
     choices = three_options(pool)
@@ -372,8 +512,8 @@ with tabs[2]:
     if not choices:
         st.warning(f"在 {selected_date} 沒有符合技能、語言、強制休息或當日額滿的可用居服員。")
     else:
-        st.subheader(f"💡 AI 推薦三大調度方案比對（排班日期：{selected_date}）")
-        st.caption("系統已先排除保護中與當日服務量達上限的人員；督導仍可依現場需求做最終判斷。")
+        st.subheader(f"派案建議（{selected_date}）")
+        st.caption("系統已排除保護中、時段衝突與當日服務量達上限的人員；由督導做最終派案判斷。")
         cols = st.columns(3)
                 
         
@@ -383,7 +523,7 @@ with tabs[2]:
                     st.markdown(f"### {label}")
                     st.caption({"方案 A｜整體最佳": "兼顧連續性、路程及疲勞平衡", "方案 B｜距離最近": "優先最短移動時間與距離", "方案 C｜負荷最低": "優先避免居服員過勞"}[label])
                     st.divider()
-                    st.subheader(f"👤 {pick['姓名']}（{pick['居服員ID']}）")
+                    st.subheader(f"{pick['姓名']}（{pick['居服員ID']}）")
 
                     st.markdown(
                         f"""
@@ -397,7 +537,7 @@ with tabs[2]:
                             margin: 0.35rem 0 0.55rem 0;
                         ">
                             <span style="font-size: 0.95rem; color: #475569;">
-                                🏆 綜合適配分數
+                                綜合適配分數
                             </span>
                             <span style="font-size: 1.55rem; font-weight: 700; color: #2563eb;">
                                 {pick['綜合分數']} 分
@@ -406,33 +546,38 @@ with tabs[2]:
                         """,
                         unsafe_allow_html=True
                     )
+                    summary_left, summary_right = st.columns(2)
+                    with summary_left:
+                        st.caption("路程")
+                        st.write(f"**{pick['路程分鐘']} 分** · {pick['公里']} km")
+                    with summary_right:
+                        st.caption("派案後疲勞")
+                        st.write(f"**{pick['預估疲勞']} 分**")
+
+                    st.caption(
+                        f"建議服務：{format_clock(pick['服務開始分鐘'])}–{format_clock(pick['服務結束分鐘'])}"
+                        f"｜{pick['班別']} {format_clock(pick['可服務開始'])}–{format_clock(pick['可服務結束'])}"
+                    )
                     skills_text = ", ".join(pick.get("技能", [])) if pick.get("技能") else "無特別紀錄"
-                    st.caption(f"🛠️ **居服員專長**：{skills_text}")
-                    
-                    
-                    st.caption(
-                        f"🚗 路程：**{pick['路程分鐘']} 分**（{pick['公里']} km）"
-                    )
-                    st.caption(
-                        f"⚡ 預估疲勞：**{pick['預估疲勞']} 分**"
-                    )
+                    with st.expander("查看照護技能"):
+                        st.caption(skills_text)
                     
                     st.divider()
-                    st.markdown("#### 🔍  AI 推薦重點")
+                    st.markdown("#### 適配重點")
                     
                     pros = []
-                    pros.append(f"🎯 **專長完全匹配**：具備個案所需的 {', '.join(case['需求技能'])} 技能")
+                    pros.append(f"**專長符合**：具備 {', '.join(case['需求技能'])} 技能")
                     if pick["熟悉個案"]:
-                        pros.append("🤝 **服務連續性極佳**：為長輩指定/熟悉之居服員，能大幅降低溝通磨合期。")
+                        pros.append("**熟悉個案**：可降低首次服務的溝通與交接成本。")
                     if pick["居服員區域"] == case["區域"]:
-                        pros.append("📍 **同區在地派遣**：居服員與長輩同屬一個行政區，突發狀況應變速度最快。")
+                        pros.append("**同區服務**：可縮短通勤與臨時應變時間。")
                     else:
-                        pros.append("⚡ **彈性機動支援**：可提供跨區支援派遣，填補區域人力缺口。")
+                        pros.append("**跨區支援**：可補足該區域的人力缺口。")
                     
                     if pick["預估疲勞"] < 50:
-                        pros.append("🟢 **體能充沛良好**：派單後預估疲勞指數極低，服務品質穩定度高。")
+                        pros.append("**負荷穩定**：派案後預估疲勞較低。")
                     elif pick["路程分鐘"] <= 5.0:
-                        pros.append("⏱️ **極短通勤車程**：預估車程在 5 分鐘以內，大幅節省交通時間成本。")
+                        pros.append("**通勤短**：預估車程在 5 分鐘內。")
                         
                     for p in pros[:2]:
                         st.markdown(f"• {p}")
@@ -440,49 +585,54 @@ with tabs[2]:
                     cons = []
                     today_loads = load_for(pick["居服員ID"], selected_date)
                     if today_loads >= 2:
-                        cons.append(f"⚠️ **當日負荷偏高**：該日已排定 {today_loads} 班，此班次為當日第 {today_loads + 1} 件。")
+                        cons.append(f"**當日負荷偏高**：已排定 {today_loads} 件服務，此案為第 {today_loads + 1} 件。")
                     if pick["預估疲勞"] >= 70:
-                        cons.append(f"🔴 **過勞高風險預警**：派單後預估疲勞高達 {pick['預估疲勞']} 分，建議優先觀察體能狀態。")
+                        cons.append(f"**疲勞偏高**：派案後預估疲勞為 {pick['預估疲勞']} 分，建議優先觀察。")
                     if pick["居服員區域"] != case["區域"]:
-                        cons.append(f"🚗 **跨區交通移動**：車程需 {pick['路程分鐘']} 分鐘，需注意跨區車流與尖峰時段。")
+                        cons.append(f"**跨區移動**：車程約 {pick['路程分鐘']} 分鐘，需留意交通狀況。")
                     if not pick["熟悉個案"]:
-                        cons.append("🧩 **初次服務長輩**：非熟悉個案，建議首次服務前先確認照顧注意事項。")
+                        cons.append("**初次服務**：建議先確認個案照顧注意事項。")
                         
                     if cons:
-                        st.markdown("#### ⚠️ 督導提醒")
+                        st.markdown("#### 督導注意")
                         st.markdown(f"• {cons[0]}")
                         
                     st.markdown("<div style='height: 0.35rem;'></div>", unsafe_allow_html=True)
-                    st.caption(f"🗺️ 路線資料來源：{pick['路線來源']}（{pick['路線說明']}）")
+                    st.caption(f"路線：{pick['路線來源']}（{pick['路線說明']}）")
                     
                     is_selected_worker = (existing_assignment is not None and existing_assignment["居服員ID"] == pick["居服員ID"])
 
-                    if st.button("✅ 已派遣給此人"if is_selected_worker else ("此個案已派遣" if existing_assignment else "採用此方案派單")
+                    if st.button("已派遣給此人"if is_selected_worker else ("此個案已派遣" if existing_assignment else "確認派案")
                                  ,key=f"choose_{label}_{selected_id}_{selected_date}",
                                  use_container_width=True,disabled=existing_assignment is not None,):
                         ok, message = commit(case, pick, selected_date)
                         if ok:
                             st.success(message)
                             all_case_indices = list(cases.index)
+
                             assigned_ids_today = {
                                 item["個案ID"]
                                 for item in st.session_state.assignments
                                 if item["服務日"] == selected_date
                             }
+
                             pending_indices = [
                                 idx
                                 for idx in all_case_indices
                                 if cases.loc[idx, "id"] not in assigned_ids_today
                             ]
+
                             current_position = all_case_indices.index(selected_index)
                             next_order = (
                                 all_case_indices[current_position + 1:]
                                 + all_case_indices[:current_position]
                             )
+
                             next_index = next(
                                 (idx for idx in next_order if idx in pending_indices),
                                 None,
                             )
+
                             if next_index is not None:
                                 st.session_state.next_case_picker_index = next_index
                                 st.session_state.notification_toast = (
@@ -492,16 +642,17 @@ with tabs[2]:
                                 st.session_state.notification_toast = (
                                     "派案已確認，通知已產生；這個日期的個案都已完成派遣。"
                                 )
+
                             st.rerun()
                         else:
                             st.error(message)
 
         if len({x[1]['居服員ID'] for x in choices}) < 3:
-            st.caption("💡 合格人選不足三位，因此部分方案使用相同候選人；這不是顯示錯誤。")
+            st.caption("部分方案指向同一位居服員，表示她同時符合多項調度目標；這不是重複派案。")
 
     st.divider()
     st.subheader("📋 目前已排定之班表總覽")
-    st.caption("班表會依你在「智慧媒合」中選擇的服務日期，記錄個案、居服員、通勤時間與疲勞指數。")
+    st.caption("班表會記錄精確服務時間、服務長度、通勤時間與疲勞指數；同一位居服員的時間重疊會自動排除。")
     if st.session_state.assignments:
         for assignment in st.session_state.assignments:
             assignment.setdefault("通知狀態", "通知已產生")
@@ -509,7 +660,7 @@ with tabs[2]:
 
         df_assign = pd.DataFrame(st.session_state.assignments)
         assignment_options = {
-            f"{row['服務日']}｜{row['個案ID']}｜{row['個案']} → {row['居服員']}": index
+            f"{row['服務日']}｜{row.get('服務時段', '待確認')}｜{row['個案ID']}｜{row['個案']} → {row['居服員']}": index
             for index, row in df_assign.iterrows()
         }
 
@@ -543,7 +694,7 @@ with tabs[2]:
             key="schedule_view_date"
         )
 
-        day_schedule = df_assign[df_assign["服務日"] == view_date]
+        day_schedule = df_assign[df_assign["服務日"] == view_date].sort_values(["居服員", "服務開始分鐘"])
 
         if day_schedule.empty:
             st.info(f"{view_date} 尚無已確認的派案。")
@@ -846,6 +997,7 @@ with tabs[5]:
             with st.container(border=True):
                 st.markdown(f"### 👵 {item['個案']}（{item['個案ID']}）")
                 st.write(f"📅 服務日期：{item['服務日']}")
+                st.write(f"🕒 服務時段：{item.get('服務時段', '待確認')}")
                 st.write("📍 服務地點：大安區・信義路三段附近（確認接案後提供完整地址）")
                 st.write(f"📍 預估交通時間：{item['分鐘']} 分鐘")
                 st.write(f"📌 目前狀態：**{status}**")
