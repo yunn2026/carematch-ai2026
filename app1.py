@@ -224,6 +224,17 @@ def caregiver_day_assignments(cg_id: str, target_date: date) -> list[dict]:
     )
 
 
+def assignment_route_point(item: dict) -> str:
+    return item.get("個案路線位置", item["個案區域"])
+
+
+def inbound_route(cg: pd.Series, case: pd.Series, target_date: date, start: int) -> tuple[float, float, str, str]:
+    assigned = caregiver_day_assignments(cg.id, target_date)
+    previous = next((item for item in reversed(assigned) if item["服務開始分鐘"] <= start), None)
+    origin = assignment_route_point(previous) if previous else cg["路線位置"]
+    return route(origin, case["路線位置"])
+
+
 def feasible_service_window(cg: pd.Series, case: pd.Series, target_date: date) -> tuple[int, int, float] | None:
     duration = int(case["服務分鐘"])
     assigned = caregiver_day_assignments(cg.id, target_date)
@@ -235,16 +246,16 @@ def feasible_service_window(cg: pd.Series, case: pd.Series, target_date: date) -
         previous = next((item for item in reversed(assigned) if item["服務開始分鐘"] <= start), None)
         following = next((item for item in assigned if item["服務開始分鐘"] >= end), None)
         if previous:
-            before, _, _, _ = route(previous["個案區域"], case["區域"])
+            before, _, _, _ = route(assignment_route_point(previous), case["路線位置"])
             ready_at = previous["服務結束分鐘"] + before + 10
         else:
-            before, _, _, _ = route(cg["區域"], case["區域"])
+            before, _, _, _ = route(cg["路線位置"], case["路線位置"])
             ready_at = int(cg["可服務開始"]) + before + 10
         if ready_at > start:
             return False, 0.0
         idle = start - ready_at
         if following:
-            after, _, _, _ = route(case["區域"], following["個案區域"])
+            after, _, _, _ = route(case["路線位置"], assignment_route_point(following))
             if end + after + 10 > following["服務開始分鐘"]:
                 return False, 0.0
             idle += following["服務開始分鐘"] - (end + after + 10)
@@ -279,7 +290,7 @@ def candidates(case: pd.Series, target_date: date, use_maps: bool = True) -> lis
             continue
         service_start, service_end, idle_minutes = window
         if use_maps:
-            minutes, km, source, detail = route(cg["路線位置"], case["路線位置"])
+            minutes, km, source, detail = inbound_route(cg, case, target_date, service_start)
         else:
             minutes = 4.0 if cg["區域"] == case["區域"] else 18.0
             km, source, detail = (1.2 if cg["區域"] == case["區域"] else 5.0), "模型估算", "週期模擬"
@@ -335,7 +346,7 @@ def commit(case: pd.Series, choice: dict, target_date: date) -> tuple[bool, str]
         "分鐘": choice["路程分鐘"], "公里": choice["公里"], "疲勞": choice["預估疲勞"],
         "服務開始分鐘": service_start, "服務結束分鐘": service_end,
         "服務時段": f"{format_clock(service_start)}–{format_clock(service_end)}",
-        "服務分鐘": int(case["服務分鐘"]), "時段類型": case["時段類型"], "個案區域": case["區域"],
+        "服務分鐘": int(case["服務分鐘"]), "時段類型": case["時段類型"], "個案區域": case["區域"], "個案路線位置": case["路線位置"],
         "基準分鐘": sum(p["路程分鐘"] for p in peers) / len(peers), 
         "基準疲勞": sum(p["預估疲勞"] for p in peers) / len(peers)
     })
