@@ -730,8 +730,12 @@ with tabs[2]:
         if day_schedule.empty:
             st.info(f"{view_date} 尚無已確認的派案。")
         else:
+            display_schedule = day_schedule.copy()
+            display_schedule["服務開始"] = display_schedule["服務開始分鐘"].map(format_clock)
+            display_schedule["服務結束"] = display_schedule["服務結束分鐘"].map(format_clock)
+            display_schedule = display_schedule.drop(columns=["服務開始分鐘", "服務結束分鐘"], errors="ignore")
             st.dataframe(
-                day_schedule,
+                display_schedule,
                 use_container_width=True,
                 hide_index=True
             )
