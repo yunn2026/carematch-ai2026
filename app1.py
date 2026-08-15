@@ -406,7 +406,7 @@ st.caption("派案流程：① 預測人力需求　→　② 偵測並保護過
 tabs = st.tabs([ "🗺️ 今日供需／臨時異動",
     "🧠 過勞風險預警",
     "🎯 AI 智慧媒合",
-    "🔔 派案確認與通知",
+    "🔔 臨時異動與高優先派案中心",
     "📈 排班結果與成效",
     "📱 居服員服務回覆（展示）"])
 
@@ -813,7 +813,27 @@ with tabs[3]:
                         pool = candidates(row, target_date)
 
                         if not pool:
-                            st.error("⚠️ 沒有符合條件的可用居服員。")
+                            st.error("無安全可派人選：系統不會為了完成派案而忽略技能、時段或過勞風險。")
+                            st.write("請由督導啟動緊急調度：優先聯絡備勤／機動人力，其次擴大跨區支援；並依單位流程通知個案／家屬。")
+                            escalation_key = f"triage_{target_date}_{row['id']}"
+                            existing_escalations = st.session_state.setdefault("escalations", [])
+                            already_escalated = any(item["key"] == escalation_key for item in existing_escalations)
+                            if st.button(
+                                "建立督導緊急調度任務" if not already_escalated else "已建立督導緊急調度任務",
+                                key=f"escalate_{escalation_key}",
+                                disabled=already_escalated,
+                                use_container_width=True,
+                            ):
+                                existing_escalations.append({
+                                    "key": escalation_key,
+                                    "服務日": target_date,
+                                    "個案ID": row["id"],
+                                    "個案": row["姓名"],
+                                    "原因": "高優先個案無安全可派人選",
+                                    "處置": "聯絡備勤／機動人力、擴大跨區支援並通知個案／家屬",
+                                })
+                                st.toast("已建立督導緊急調度任務，請優先聯絡備勤或合作人力。", icon="⚠️")
+                                st.rerun()
                         else:
                             cg_options = {
                                 f"{p['姓名']}（{p['居服員ID']}）｜適配度 {p['綜合分數']} 分": p
