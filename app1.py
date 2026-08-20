@@ -359,10 +359,6 @@ notification_toast = st.session_state.pop("notification_toast", None)
 if notification_toast:
     st.toast(notification_toast, icon="🔔")
 
-protection_toasts = st.session_state.pop("protection_toasts", [])
-for message, icon in protection_toasts:
-    st.toast(message, icon=icon)
-
 with st.sidebar:
     st.header("資料與地圖設定")
     if st.button("重新產生隨機資料", use_container_width=True):
@@ -459,11 +455,14 @@ with tabs[1]:
                 with col_b:
                     if st.button("啟動保護排班", key=f"rest_{cg.id}", use_container_width=True):
                         st.session_state.protected.add(cg.id)
-                        st.session_state.protection_toasts = [
-                            (f"已通知居服員：{cg['姓名']} 因疲勞風險偏高，請多加休息。", "🛑"),
-                            (f"已通知管理者：{cg['姓名']} 疲勞風險偏高，請留意後續服務安排。", "⚠️"),
-                        ]
-                        st.rerun()
+                        st.toast(
+                            f"已通知居服員：{cg['姓名']} 因疲勞風險偏高，請多加休息。",
+                            icon="🛑",
+                        )
+                        st.toast(
+                            f"已通知管理者：{cg['姓名']} 疲勞風險偏高，請留意後續服務安排。",
+                            icon="⚠️",
+                        )
 
     st.divider()
 
