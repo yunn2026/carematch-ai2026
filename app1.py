@@ -397,6 +397,18 @@ st.markdown("""
         margin-top: 0.45rem;
         margin-bottom: 0.45rem;
     }
+
+    /* 右上角通知約停留 3 秒後淡出 */
+    @keyframes carematchToastFade {
+        to {
+            opacity: 0;
+            visibility: hidden;
+        }
+    }
+
+    div[data-testid="stToast"] {
+        animation: carematchToastFade 0.25s ease 2.75s forwards !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
